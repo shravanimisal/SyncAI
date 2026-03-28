@@ -2,6 +2,9 @@ import os
 import base64
 import re
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -11,6 +14,7 @@ from googleapiclient.discovery import build
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
 
+# 🔑 AUTH SERVICE
 def get_gmail_service():
     creds = None
 
@@ -21,6 +25,7 @@ def get_gmail_service():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            # ⚠️ LOCAL ONLY (will fix for Render later)
             flow = InstalledAppFlow.from_client_secrets_file(
                 'credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
@@ -31,6 +36,7 @@ def get_gmail_service():
     return build('gmail', 'v1', credentials=creds)
 
 
+# 📌 EMAIL TRACKING
 def is_email_processed(email_id):
     if not os.path.exists("processed_emails.txt"):
         return False
@@ -52,6 +58,7 @@ def mark_as_read(email_id):
     ).execute()
 
 
+# 📩 HELPER
 def extract_sender(headers):
     for header in headers:
         if header['name'] == 'From':
@@ -61,6 +68,7 @@ def extract_sender(headers):
     return ""
 
 
+# 📥 FETCH SINGLE EMAIL (AUTO SYSTEM)
 def get_latest_email():
     try:
         service = get_gmail_service()
@@ -114,6 +122,53 @@ def get_latest_email():
         return {"error": str(e)}
 
 
+# 📥 FETCH MULTIPLE EMAILS (FOR DASHBOARD)
+def fetch_emails(max_results=10):
+    try:
+        service = get_gmail_service()
+
+        results = service.users().messages().list(
+            userId='me',
+            labelIds=['INBOX'],
+            maxResults=max_results
+        ).execute()
+
+        messages = results.get('messages', [])
+        email_list = []
+
+        for msg_data in messages:
+            msg = service.users().messages().get(
+                userId='me',
+                id=msg_data['id'],
+                format='metadata',
+                metadataHeaders=['Subject', 'From']
+            ).execute()
+
+            headers = msg.get('payload', {}).get('headers', [])
+
+            subject = ""
+            sender = ""
+
+            for h in headers:
+                if h['name'] == 'Subject':
+                    subject = h['value']
+                if h['name'] == 'From':
+                    sender = h['value']
+
+            email_list.append({
+                "id": msg_data['id'],
+                "sender": sender,
+                "subject": subject,
+                "snippet": msg.get('snippet', '')
+            })
+
+        return email_list
+
+    except Exception as e:
+        return [{"error": str(e)}]
+
+
+# 📤 SEND REPLY
 def send_email_reply(to_email, subject, message_text):
     try:
         service = get_gmail_service()
@@ -130,6 +185,43 @@ def send_email_reply(to_email, subject, message_text):
         ).execute()
 
         return "✅ Email sent"
+
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+# 🚀 SEND EMAIL (WITH ATTACHMENT SUPPORT)
+def send_email(to, subject, body, attachment=None):
+    try:
+        service = get_gmail_service()
+
+        message = MIMEMultipart()
+        message['to'] = to
+        message['subject'] = subject
+
+        message.attach(MIMEText(body, 'plain'))
+
+        # 📎 Attachment
+        if attachment and os.path.exists(attachment):
+            with open(attachment, "rb") as f:
+                part = MIMEBase("application", "octet-stream")
+                part.set_payload(f.read())
+
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition",
+                f'attachment; filename="{os.path.basename(attachment)}"'
+            )
+            message.attach(part)
+
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+        service.users().messages().send(
+            userId="me",
+            body={'raw': raw}
+        ).execute()
+
+        return "✅ Sent"
 
     except Exception as e:
         return f"❌ Error: {str(e)}"
