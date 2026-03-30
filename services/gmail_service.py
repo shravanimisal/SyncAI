@@ -1,6 +1,7 @@
 import os
 import base64
 import re
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -8,30 +9,28 @@ from email import encoders
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
 
-# 🔑 AUTH SERVICE
+# 🔑 AUTH SERVICE (FIXED FOR RENDER ✅)
 def get_gmail_service():
     creds = None
 
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    # 🔥 Read from ENV variable
+    token_data = os.environ.get("GOOGLE_TOKEN")
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # ⚠️ LOCAL ONLY (will fix for Render later)
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+    if token_data:
+        creds_dict = json.loads(token_data)
+        creds = Credentials.from_authorized_user_info(creds_dict, SCOPES)
 
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+    if not creds:
+        raise Exception("❌ GOOGLE_TOKEN not found in environment variables")
+
+    # Refresh token if expired
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
 
     return build('gmail', 'v1', credentials=creds)
 
@@ -68,7 +67,7 @@ def extract_sender(headers):
     return ""
 
 
-# 📥 FETCH SINGLE EMAIL (AUTO SYSTEM)
+# 📥 FETCH SINGLE EMAIL
 def get_latest_email():
     try:
         service = get_gmail_service()
@@ -122,7 +121,7 @@ def get_latest_email():
         return {"error": str(e)}
 
 
-# 📥 FETCH MULTIPLE EMAILS (FOR DASHBOARD)
+# 📥 FETCH MULTIPLE EMAILS
 def fetch_emails(max_results=10):
     try:
         service = get_gmail_service()
@@ -190,7 +189,7 @@ def send_email_reply(to_email, subject, message_text):
         return f"❌ Error: {str(e)}"
 
 
-# 🚀 SEND EMAIL (WITH ATTACHMENT SUPPORT)
+# 🚀 SEND EMAIL WITH ATTACHMENT
 def send_email(to, subject, body, attachment=None):
     try:
         service = get_gmail_service()
@@ -201,7 +200,6 @@ def send_email(to, subject, body, attachment=None):
 
         message.attach(MIMEText(body, 'plain'))
 
-        # 📎 Attachment
         if attachment and os.path.exists(attachment):
             with open(attachment, "rb") as f:
                 part = MIMEBase("application", "octet-stream")
