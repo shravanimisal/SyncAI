@@ -1,9 +1,13 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import os
 
-from services.gmail_service import send_bulk_emails
-from agents.assistant_agent import generate_ai_email
-from utils.file_handler import extract_emails_from_file
+from services.gmail_service import send_email
+from agents.assistant_agent import (
+    generate_ai_email,
+    improve_email,
+    personalize_email,
+    chat_with_ai
+)
 
 app = Flask(__name__)
 
@@ -16,82 +20,111 @@ def home():
     return "🚀 AI Email Agent Live"
 
 
-# 🤖 AI EMAIL GENERATOR
-@app.route("/generate-email", methods=["POST"])
+# =========================
+# ✉️ AI EMAIL GENERATION (FIXED)
+# =========================
+@app.route("/ai/generate", methods=["POST"])
 def generate_email():
     data = request.json
+
     prompt = data.get("prompt")
+    tone = data.get("tone", "professional")
+    length = data.get("length", "medium")
+    language = data.get("language", "English")
+    user_id = data.get("user_id", "default")
 
     if not prompt:
         return {"error": "Prompt required"}, 400
 
-    email = generate_ai_email(prompt)
-    return {"generated_email": email}
+    email = generate_ai_email(prompt, tone, length, language, user_id)
+
+    # 🔥 IMPORTANT FIX → RETURN CLEAN TEXT
+    return Response(email, mimetype="text/plain")
 
 
-# 📧 BULK EMAIL (MANUAL)
-@app.route("/send-bulk", methods=["POST"])
-def send_bulk():
+# =========================
+# 🤖 AI CHATBOT
+# =========================
+@app.route("/ai/chat", methods=["POST"])
+def ai_chat():
     data = request.json
+    message = data.get("message")
 
-    emails = data.get("emails")
-    subject = data.get("subject")
-    body = data.get("body")
+    if not message:
+        return {"error": "Message required"}, 400
 
-    if not emails:
-        return {"error": "Emails required"}, 400
-
-    results = send_bulk_emails(emails, subject, body)
-
-    return {
-        "message": "Bulk email sent",
-        "results": results
-    }
+    reply = chat_with_ai(message)
+    return {"reply": reply}
 
 
-# 📂 BULK EMAIL VIA FILE
-@app.route("/send-bulk-upload", methods=["POST"])
-def send_bulk_upload():
-    try:
-        file = request.files.get("file")
-        subject = request.form.get("subject")
-        body = request.form.get("body")
-
-        if not file:
-            return {"error": "File required"}, 400
-
-        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
-        file.save(file_path)
-
-        emails = extract_emails_from_file(file_path)
-
-        if not emails:
-            return {"error": "No emails found in file"}, 400
-
-        results = send_bulk_emails(emails, subject, body)
-
-        return {
-            "message": "Emails sent from file",
-            "results": results
-        }
-
-    except Exception as e:
-        return {"error": str(e)}, 500
-
-
-# 🤖 AI ASSISTANT CHAT
-@app.route("/ai-assistant", methods=["POST"])
-def ai_assistant():
+# =========================
+# ✨ IMPROVE EMAIL
+# =========================
+@app.route("/ai/improve", methods=["POST"])
+def improve():
     data = request.json
-    query = data.get("query")
+    email_text = data.get("email")
 
-    if not query:
-        return {"error": "Query required"}, 400
+    if not email_text:
+        return {"error": "Email text required"}, 400
 
-    response = generate_ai_email(query)
-    return {"response": response}
+    improved = improve_email(email_text)
+    return {"improved_email": improved}
 
 
+# =========================
+# 👤 PERSONALIZE EMAIL
+# =========================
+@app.route("/ai/personalize", methods=["POST"])
+def personalize():
+    data = request.json
+    email_text = data.get("email")
+    name = data.get("name")
+
+    if not email_text or not name:
+        return {"error": "Email and name required"}, 400
+
+    result = personalize_email(email_text, name)
+    return {"personalized_email": result}
+
+
+# =========================
+# 📧 SEND EMAIL (WITH ATTACHMENT)
+# =========================
+@app.route("/send-email", methods=["POST"])
+def send_single_email():
+    to = request.form.get("to") or request.values.get("to")
+    subject = request.form.get("subject") or request.values.get("subject")
+    body = request.form.get("body") or request.values.get("body")
+
+    if not to:
+        return {"error": "Recipient email required"}, 400
+
+    if not subject:
+        subject = "No Subject"
+
+    if not body:
+        body = "Hello from AI agent"
+
+    attachment_file = request.files.get("attachment")
+    attachment_path = None
+
+    if attachment_file:
+        filename = attachment_file.filename.replace(" ", "_")
+        attachment_path = os.path.join(UPLOAD_FOLDER, filename)
+        attachment_file.save(attachment_path)
+
+    result = send_email(to, subject, body, attachment_path)
+
+    return jsonify({
+        "message": "Email sent successfully",
+        "result": str(result)
+    })
+
+
+# =========================
+# 🚀 SERVER START
+# =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    print("🚀 Server starting on http://127.0.0.1:5000")
+    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)

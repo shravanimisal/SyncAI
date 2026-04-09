@@ -1,6 +1,18 @@
+# Python
 venv/
 __pycache__/
+*.pyc
+
+# Environment
 .env
+
+# Gmail API secrets
 token.json
 credentials.json
-*.pyc
+
+# Uploads
+uploads/
+
+# System
+.DS_Store
+Thumbs.db

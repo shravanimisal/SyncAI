@@ -1,46 +1,91 @@
-import json
 import os
+from dotenv import load_dotenv
+from openai import OpenAI
 
-FILE = "analytics.json"
+from utils.memory_manager import (
+    save_user_preferences,
+    get_user_preferences,
+    save_email_history
+)
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    base_url="https://openrouter.ai/api/v1",
+    default_headers={
+        "HTTP-Referer": "http://localhost:5000",
+        "X-Title": "AI Email Agent"
+    }
+)
+
+MODEL = "mistralai/mistral-7b-instruct"
+
+# ✅ ALLOWED LANGUAGES ONLY
+SUPPORTED_LANGUAGES = ["English", "Hindi", "Marathi"]
 
 
-def load_data():
-    if not os.path.exists(FILE):
-        return {
-            "total_emails": 0,
-            "replies_sent": 0,
-            "skipped": 0,
-            "meetings": 0
-        }
-
+def get_ai_response(messages):
     try:
-        with open(FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {
-            "total_emails": 0,
-            "replies_sent": 0,
-            "skipped": 0,
-            "meetings": 0
-        }
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            temperature=0.2,   # 🔥 VERY IMPORTANT (low randomness)
+            top_p=0.9
+        )
+
+        if response and response.choices:
+            return response.choices[0].message.content.strip()
+        else:
+            return "❌ AI Error: No response from model"
+
+    except Exception as e:
+        return f"❌ AI Error: {str(e)}"
 
 
-def save_data(data):
-    with open(FILE, "w") as f:
-        json.dump(data, f, indent=2)
+# 🚀 STRICT MULTILINGUAL EMAIL GENERATOR
+def generate_ai_email(prompt, tone="professional", length="medium", language="English", user_id="default"):
+    try:
+        if language == "Hindi":
+            lang_instruction = "ONLY Hindi language. Use Devanagari script."
+        elif language == "Marathi":
+            lang_instruction = "ONLY Marathi language. Use Devanagari script."
+        else:
+            lang_instruction = "ONLY English language."
 
+        system_prompt = f"""
+You are an email generator.
 
-# 🔥 IMPORTANT FUNCTION (this was missing)
-def increment(field):
-    data = load_data()
+STRICT RULES:
+- {lang_instruction}
+- DO NOT use any other language
+- DO NOT translate
+- DO NOT explain anything
+- NO placeholders like [Your Name]
+- Output must be clean email
 
-    if field not in data:
-        data[field] = 0
+FORMAT:
+Subject:
+<subject>
 
-    data[field] += 1
+<email>
 
-    save_data(data)
+<closing>
+"""
 
+        user_prompt = f"""
+Write a {tone} and {length} email.
 
-def get_analytics():
-    return load_data()
+Topic:
+{prompt}
+"""
+
+        response = get_ai_response([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ])
+
+        return response
+
+    except Exception as e:
+        return f"❌ AI Error: {str(e)}"
